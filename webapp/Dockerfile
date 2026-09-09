@@ -8,7 +8,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 # CPU-only torch build -- avoids pulling multi-GB CUDA wheels.
-RUN pip install --no-cache-dir torch==2.5.* torchvision==0.20.* \
+RUN pip install --no-cache-dir torch==2.13.* torchvision==0.28.* \
     --index-url https://download.pytorch.org/whl/cpu
 
 COPY webapp/requirements.txt /app/webapp/requirements.txt
