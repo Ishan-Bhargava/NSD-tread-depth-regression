@@ -1,0 +1,8 @@
+--extra-index-url https://download.pytorch.org/whl/cpu
+
+streamlit==1.39.*
+torch==2.5.*
+torchvision==0.20.*
+opencv-python-headless==4.10.*
+numpy>=1.26,<3
+pandas>=2.2,<3

@@ -1,0 +1,349 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>NSD Tread Depth</title>
+<style>
+  :root {
+    --bg: #f4f6f8;
+    --card: #ffffff;
+    --text: #1a2027;
+    --muted: #6b7480;
+    --primary: #1f6feb;
+    --primary-dark: #1958c4;
+    --accent: #16a34a;
+    --danger: #dc2626;
+    --border: #e2e5e9;
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0;
+    height: 100%;
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  }
+  body {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 28px 16px 40px;
+    min-height: 100%;
+  }
+  .header { text-align: center; margin-bottom: 22px; }
+  .header h1 { font-size: 1.4rem; margin: 0 0 4px; }
+  .header p { margin: 0; color: var(--muted); font-size: 0.85rem; }
+
+  .card {
+    width: 100%;
+    max-width: 420px;
+    background: var(--card);
+    border-radius: 20px;
+    padding: 24px;
+    box-shadow: 0 2px 16px rgba(0,0,0,0.06);
+  }
+
+  /* ---------- Step: choose source ---------- */
+  .choice-btn {
+    width: 100%;
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    padding: 18px;
+    border-radius: 14px;
+    border: 1.5px solid var(--border);
+    background: #fafbfc;
+    font-size: 1rem;
+    font-weight: 600;
+    color: var(--text);
+    cursor: pointer;
+    margin-bottom: 14px;
+    transition: border-color .15s, background .15s;
+  }
+  .choice-btn:last-child { margin-bottom: 0; }
+  .choice-btn:hover { border-color: var(--primary); background: #f0f6ff; }
+  .choice-btn .icon { font-size: 1.6rem; line-height: 1; }
+  .choice-btn .sub { display: block; font-size: 0.78rem; font-weight: 400; color: var(--muted); margin-top: 2px; }
+
+  /* ---------- Step: preview / camera ---------- */
+  video, #previewVideo {
+    width: 100%;
+    border-radius: 14px;
+    background: #000;
+    display: block;
+  }
+  .preview-wrap { margin-bottom: 16px; }
+  .filename { font-size: 0.85rem; color: var(--muted); margin: 10px 2px 0; word-break: break-all; }
+
+  .row { display: flex; gap: 10px; margin-top: 16px; }
+  .btn {
+    flex: 1;
+    padding: 14px;
+    border-radius: 12px;
+    border: none;
+    font-size: 0.95rem;
+    font-weight: 700;
+    cursor: pointer;
+  }
+  .btn-primary { background: var(--primary); color: #fff; }
+  .btn-primary:hover { background: var(--primary-dark); }
+  .btn-primary:disabled { background: #a9c3ea; cursor: not-allowed; }
+  .btn-secondary { background: #eef1f4; color: var(--text); }
+  .btn-secondary:hover { background: #e2e6ea; }
+  .btn-danger { background: #fdecec; color: var(--danger); }
+
+  .rec-indicator {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 0.85rem;
+    font-weight: 700;
+    color: var(--danger);
+    margin-top: 10px;
+  }
+  .rec-dot {
+    width: 10px; height: 10px; border-radius: 50%;
+    background: var(--danger);
+    animation: pulse 1s infinite;
+  }
+  @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.3; } }
+
+  /* ---------- Step: loading ---------- */
+  .loading { text-align: center; padding: 30px 0; }
+  .spinner {
+    width: 46px; height: 46px;
+    border: 4px solid #dfe6ee;
+    border-top-color: var(--primary);
+    border-radius: 50%;
+    margin: 0 auto 18px;
+    animation: spin 0.9s linear infinite;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .loading p { color: var(--muted); font-size: 0.9rem; }
+
+  /* ---------- Step: result ---------- */
+  .result { text-align: center; padding: 10px 0 4px; }
+  .result .label { color: var(--muted); font-size: 0.85rem; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; }
+  .result .value { font-size: 3.6rem; font-weight: 800; color: var(--accent); margin: 10px 0 2px; line-height: 1; }
+  .result .unit { font-size: 1.1rem; color: var(--muted); font-weight: 600; }
+
+  .error-box {
+    background: #fdecec;
+    color: var(--danger);
+    border-radius: 12px;
+    padding: 14px;
+    font-size: 0.9rem;
+    margin-bottom: 16px;
+  }
+
+  .hidden { display: none !important; }
+</style>
+</head>
+<body>
+
+  <div class="header">
+    <h1>Tyre Tread Depth (NSD)</h1>
+    <p>Upload or record a short scan of the tyre tread</p>
+  </div>
+
+  <div class="card">
+
+    <!-- STEP 1: choose source -->
+    <div id="stepChoose">
+      <div id="errorBox" class="error-box hidden"></div>
+      <button class="choice-btn" id="btnBrowse">
+        <span class="icon">📁</span>
+        <span>
+          Choose a video file
+          <span class="sub">Pick an existing video from this device</span>
+        </span>
+      </button>
+      <button class="choice-btn" id="btnCamera">
+        <span class="icon">🎥</span>
+        <span>
+          Record with camera
+          <span class="sub">Use your camera to scan the tread now</span>
+        </span>
+      </button>
+      <input type="file" id="fileInput" accept="video/*" class="hidden">
+    </div>
+
+    <!-- STEP 2a: live camera recording -->
+    <div id="stepRecord" class="hidden">
+      <div class="preview-wrap">
+        <video id="liveVideo" autoplay muted playsinline></video>
+      </div>
+      <div id="recIndicator" class="rec-indicator hidden">
+        <span class="rec-dot"></span> Recording…
+      </div>
+      <div class="row">
+        <button class="btn btn-secondary" id="btnCancelRecord">Cancel</button>
+        <button class="btn btn-primary" id="btnToggleRecord">Start recording</button>
+      </div>
+    </div>
+
+    <!-- STEP 2b: confirm a chosen/recorded video -->
+    <div id="stepPreview" class="hidden">
+      <div class="preview-wrap">
+        <video id="previewVideo" controls playsinline></video>
+        <div class="filename" id="fileNameLabel"></div>
+      </div>
+      <div class="row">
+        <button class="btn btn-secondary" id="btnRetake">Choose another</button>
+        <button class="btn btn-primary" id="btnAnalyze">Analyze</button>
+      </div>
+    </div>
+
+    <!-- STEP 3: loading -->
+    <div id="stepLoading" class="hidden loading">
+      <div class="spinner"></div>
+      <p>Analyzing tread depth…</p>
+    </div>
+
+    <!-- STEP 4: result -->
+    <div id="stepResult" class="hidden">
+      <div class="result">
+        <div class="label">Estimated Tread Depth</div>
+        <div class="value"><span id="resultValue">--</span><span class="unit"> mm</span></div>
+      </div>
+      <div class="row">
+        <button class="btn btn-secondary" id="btnScanAnother">Scan another tyre</button>
+      </div>
+    </div>
+
+  </div>
+
+<script>
+  const el = (id) => document.getElementById(id);
+  const steps = ["stepChoose", "stepRecord", "stepPreview", "stepLoading", "stepResult"];
+  function showStep(id) {
+    steps.forEach(s => el(s).classList.toggle("hidden", s !== id));
+  }
+  function showError(msg) {
+    const box = el("errorBox");
+    box.textContent = msg;
+    box.classList.remove("hidden");
+  }
+  function clearError() {
+    el("errorBox").classList.add("hidden");
+  }
+
+  let selectedBlob = null;
+  let selectedName = "video.mp4";
+  let mediaStream = null;
+  let mediaRecorder = null;
+  let recordedChunks = [];
+
+  // ---------- Choose from file system ----------
+  el("btnBrowse").addEventListener("click", () => {
+    clearError();
+    el("fileInput").click();
+  });
+  el("fileInput").addEventListener("change", (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    selectedBlob = file;
+    selectedName = file.name;
+    goToPreview(URL.createObjectURL(file));
+  });
+
+  // ---------- Record with camera ----------
+  el("btnCamera").addEventListener("click", async () => {
+    clearError();
+    try {
+      mediaStream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: "environment" },
+        audio: false,
+      });
+    } catch (err) {
+      showError("Could not access the camera: " + err.message);
+      return;
+    }
+    el("liveVideo").srcObject = mediaStream;
+    recordedChunks = [];
+    el("recIndicator").classList.add("hidden");
+    el("btnToggleRecord").textContent = "Start recording";
+    el("btnToggleRecord").dataset.recording = "0";
+    showStep("stepRecord");
+  });
+
+  function stopStream() {
+    if (mediaStream) {
+      mediaStream.getTracks().forEach(t => t.stop());
+      mediaStream = null;
+    }
+  }
+
+  el("btnCancelRecord").addEventListener("click", () => {
+    stopStream();
+    showStep("stepChoose");
+  });
+
+  el("btnToggleRecord").addEventListener("click", () => {
+    const recording = el("btnToggleRecord").dataset.recording === "1";
+    if (!recording) {
+      const mimeCandidates = ["video/webm;codecs=vp9", "video/webm", "video/mp4"];
+      const mimeType = mimeCandidates.find(m => window.MediaRecorder && MediaRecorder.isTypeSupported(m)) || "";
+      recordedChunks = [];
+      mediaRecorder = new MediaRecorder(mediaStream, mimeType ? { mimeType } : undefined);
+      mediaRecorder.ondataavailable = (e) => { if (e.data.size > 0) recordedChunks.push(e.data); };
+      mediaRecorder.onstop = () => {
+        const type = mediaRecorder.mimeType || "video/webm";
+        selectedBlob = new Blob(recordedChunks, { type });
+        selectedName = "camera_recording." + (type.includes("mp4") ? "mp4" : "webm");
+        stopStream();
+        goToPreview(URL.createObjectURL(selectedBlob));
+      };
+      mediaRecorder.start();
+      el("btnToggleRecord").textContent = "Stop recording";
+      el("btnToggleRecord").dataset.recording = "1";
+      el("recIndicator").classList.remove("hidden");
+    } else {
+      mediaRecorder.stop();
+      el("btnToggleRecord").dataset.recording = "0";
+    }
+  });
+
+  // ---------- Preview ----------
+  function goToPreview(url) {
+    el("previewVideo").src = url;
+    el("fileNameLabel").textContent = selectedName;
+    showStep("stepPreview");
+  }
+
+  el("btnRetake").addEventListener("click", () => {
+    selectedBlob = null;
+    el("fileInput").value = "";
+    showStep("stepChoose");
+  });
+
+  // ---------- Analyze ----------
+  el("btnAnalyze").addEventListener("click", async () => {
+    if (!selectedBlob) return;
+    showStep("stepLoading");
+    try {
+      const formData = new FormData();
+      formData.append("video", selectedBlob, selectedName);
+      const resp = await fetch("/api/predict", { method: "POST", body: formData });
+      const data = await resp.json();
+      if (!resp.ok) throw new Error(data.detail || "Analysis failed.");
+      el("resultValue").textContent = data.ensemble_pred_mm.toFixed(2);
+      showStep("stepResult");
+    } catch (err) {
+      showStep("stepChoose");
+      showError(err.message || "Something went wrong. Please try again.");
+    }
+  });
+
+  el("btnScanAnother").addEventListener("click", () => {
+    selectedBlob = null;
+    el("fileInput").value = "";
+    clearError();
+    showStep("stepChoose");
+  });
+
+  showStep("stepChoose");
+</script>
+</body>
+</html>
