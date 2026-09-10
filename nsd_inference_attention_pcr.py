@@ -226,10 +226,22 @@ def _cache_paths(cache_key):
     )
 
 
-def _frames_to_data(frames):
-    """Shared feature/attention/resize pipeline for a list of already
-    oriented BGR frames -- used for both a sampled video and a single
-    still photo (repeated FRAMES_PER_VIDEO times, see get_image_data)."""
+def get_video_data(video_path, use_cache=True):
+    """Returns (resized_frames, hand_features, attn_target_full), using
+    the on-disk cache when available. Set use_cache=False to force
+    re-decoding even if a cache entry already exists under this filename
+    -- useful if a filename got reused for a different physical video,
+    which would otherwise silently serve stale cached data."""
+    cache_key = os.path.splitext(os.path.basename(video_path))[0]
+    frames_p, feats_p, attn_p = _cache_paths(cache_key)
+
+    if use_cache and os.path.exists(frames_p) and os.path.exists(feats_p) and os.path.exists(attn_p):
+        return np.load(frames_p), np.load(feats_p), np.load(attn_p)
+
+    frames = sample_best_frames(video_path, FRAMES_PER_VIDEO)
+    if len(frames) == 0:
+        return None, None, None
+
     hand_features = np.median([extract_features(f) for f in frames], axis=0).astype(np.float32)
 
     resized = np.stack([
@@ -249,27 +261,6 @@ def _frames_to_data(frames):
         attn_pad = np.repeat(attn_targets[-1:], FRAMES_PER_VIDEO - attn_targets.shape[0], axis=0)
         attn_targets = np.concatenate([attn_targets, attn_pad], axis=0)
 
-    return resized, hand_features, attn_targets
-
-
-def get_video_data(video_path, use_cache=True):
-    """Returns (resized_frames, hand_features, attn_target_full), using
-    the on-disk cache when available. Set use_cache=False to force
-    re-decoding even if a cache entry already exists under this filename
-    -- useful if a filename got reused for a different physical video,
-    which would otherwise silently serve stale cached data."""
-    cache_key = os.path.splitext(os.path.basename(video_path))[0]
-    frames_p, feats_p, attn_p = _cache_paths(cache_key)
-
-    if use_cache and os.path.exists(frames_p) and os.path.exists(feats_p) and os.path.exists(attn_p):
-        return np.load(frames_p), np.load(feats_p), np.load(attn_p)
-
-    frames = sample_best_frames(video_path, FRAMES_PER_VIDEO)
-    if len(frames) == 0:
-        return None, None, None
-
-    resized, hand_features, attn_targets = _frames_to_data(frames)
-
     if use_cache:
         os.makedirs(CACHE_DIR, exist_ok=True)
         np.save(frames_p, resized)
@@ -277,17 +268,6 @@ def get_video_data(video_path, use_cache=True):
         np.save(attn_p, attn_targets)
 
     return resized, hand_features, attn_targets
-
-
-def get_image_data(image_bgr):
-    """Same (resized_frames, hand_features, attn_target_full) triple as
-    get_video_data, but for a single still photo (e.g. a phone/webcam
-    snapshot) instead of a video -- no temporal diversity to pick a best
-    frame from, so the one frame is just repeated FRAMES_PER_VIDEO times.
-    Not cached: stills are one-off, unlike re-scoring the same video."""
-    frame = ensure_vertical_frame(image_bgr)
-    frames = [frame] * FRAMES_PER_VIDEO
-    return _frames_to_data(frames)
 
 
 # =========================
@@ -451,36 +431,6 @@ def _get_models(fold_checkpoint_paths, n_hand_features, device):
 # PUBLIC API
 # =========================
 
-def _run_ensemble(resized_frames, hand_features, attn_target_full,
-                   fold_checkpoint_paths, fold_stats, n_hand_features, device):
-    """Runs the 5-fold ensemble on one already-preprocessed
-    (resized_frames, hand_features, attn_target_full) triple. Returns a
-    dict with each fold's prediction, the ensemble average, and
-    fold_pred_std_mm (how much the folds disagree -- a free, cheap
-    uncertainty signal). Shared by predict_video and predict_image."""
-    frames_tensor = frames_to_tensor(resized_frames).to(device)
-    _, frame_quality = build_attention_targets(attn_target_full)
-    frame_quality_tensor = torch.from_numpy(frame_quality).float().unsqueeze(0).to(device)
-
-    models = _get_models(fold_checkpoint_paths, n_hand_features, device)
-
-    result = {}
-    fold_preds = []
-    for fold_idx, model in models.items():
-        mean = fold_stats[fold_idx]["mean"]
-        std = fold_stats[fold_idx]["std"]
-        normalized = (hand_features - mean) / std
-        hand_features_tensor = torch.from_numpy(normalized).float().unsqueeze(0).to(device)
-        with torch.no_grad():
-            pred = model(frames_tensor, hand_features_tensor, frame_quality_tensor).item()
-        result[f"pred_fold{fold_idx}_mm"] = pred
-        fold_preds.append(pred)
-
-    result["ensemble_pred_mm"] = float(np.mean(fold_preds))
-    result["fold_pred_std_mm"] = float(np.std(fold_preds))
-    return result
-
-
 def predict_video(video_path, fold_checkpoint_paths=None, fold_stats=None, n_hand_features=None,
                    device=None, use_cache=True):
     """Runs the 5-fold ensemble on ONE video. No ground-truth depth needed
@@ -496,26 +446,27 @@ def predict_video(video_path, fold_checkpoint_paths=None, fold_stats=None, n_han
     if resized_frames is None:
         raise ValueError(f"Could not extract any frames from '{video_path}'.")
 
-    result = _run_ensemble(resized_frames, hand_features, attn_target_full,
-                            fold_checkpoint_paths, fold_stats, n_hand_features, device)
-    result["video_path"] = video_path
-    result["unique_id"] = os.path.splitext(os.path.basename(video_path))[0]
-    return result
+    frames_tensor = frames_to_tensor(resized_frames).to(device)
+    _, frame_quality = build_attention_targets(attn_target_full)
+    frame_quality_tensor = torch.from_numpy(frame_quality).float().unsqueeze(0).to(device)
 
+    models = _get_models(fold_checkpoint_paths, n_hand_features, device)
 
-def predict_image(image_bgr, fold_checkpoint_paths=None, fold_stats=None, n_hand_features=None, device=None):
-    """Runs the 5-fold ensemble on a single still photo (e.g. a phone/
-    webcam snapshot) instead of a video -- see get_image_data for the
-    tradeoff this implies (no best-frame selection, flat frame_quality)."""
-    if fold_checkpoint_paths is None or fold_stats is None or n_hand_features is None:
-        fold_checkpoint_paths, fold_stats, n_hand_features = _discover_checkpoints()
-    if device is None:
-        device = select_device()
+    cache_key = os.path.splitext(os.path.basename(video_path))[0]
+    result = {"video_path": video_path, "unique_id": cache_key}
+    fold_preds = []
+    for fold_idx, model in models.items():
+        mean = fold_stats[fold_idx]["mean"]
+        std = fold_stats[fold_idx]["std"]
+        normalized = (hand_features - mean) / std
+        hand_features_tensor = torch.from_numpy(normalized).float().unsqueeze(0).to(device)
+        with torch.no_grad():
+            pred = model(frames_tensor, hand_features_tensor, frame_quality_tensor).item()
+        result[f"pred_fold{fold_idx}_mm"] = pred
+        fold_preds.append(pred)
 
-    resized_frames, hand_features, attn_target_full = get_image_data(image_bgr)
-
-    result = _run_ensemble(resized_frames, hand_features, attn_target_full,
-                            fold_checkpoint_paths, fold_stats, n_hand_features, device)
+    result["ensemble_pred_mm"] = float(np.mean(fold_preds))
+    result["fold_pred_std_mm"] = float(np.std(fold_preds))
     return result
 
 

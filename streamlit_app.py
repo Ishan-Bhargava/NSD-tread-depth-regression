@@ -1,16 +1,22 @@
 """
 Streamlit deployment of the NSD tread-depth ensemble. Simple, one-screen
-UI for a non-technical user: pick a video OR take a photo, get back one
-number -- the ensemble tread depth in mm.
+UI for a non-technical user: pick a video OR record one with the camera,
+get back one number -- the ensemble tread depth in mm.
+
+Camera recording uses a small custom component (components/video_recorder)
+that records a real video clip in the browser via getUserMedia +
+MediaRecorder and hands the result back as base64 -- st.camera_input only
+captures a single still photo, which isn't enough for this model's
+frame-sampling pipeline.
 """
 
+import base64
 import os
 import sys
 import tempfile
 
-import cv2
-import numpy as np
 import streamlit as st
+import streamlit.components.v1 as components
 
 PROJECT_ROOT = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, PROJECT_ROOT)
@@ -37,7 +43,7 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 st.markdown('<div class="nsd-title">🛞 Tyre Tread Depth (NSD)</div>', unsafe_allow_html=True)
-st.markdown('<div class="nsd-sub">Upload a scan video, or take a photo of the tread</div>', unsafe_allow_html=True)
+st.markdown('<div class="nsd-sub">Upload a scan video, or record one with your camera</div>', unsafe_allow_html=True)
 
 
 @st.cache_resource(show_spinner="Loading model…")
@@ -50,7 +56,30 @@ def load_models():
 
 fold_checkpoint_paths, fold_stats, n_hand_features, device = load_models()
 
-tab_video, tab_camera = st.tabs(["📁 Upload video", "📷 Take a photo"])
+_video_recorder = components.declare_component(
+    "video_recorder", path=os.path.join(PROJECT_ROOT, "components", "video_recorder"),
+)
+
+
+def video_recorder(key=None):
+    return _video_recorder(key=key, default=None)
+
+
+def run_prediction(video_bytes, suffix):
+    with st.spinner("Analyzing tread depth…"):
+        with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
+            tmp.write(video_bytes)
+            tmp_path = tmp.name
+        try:
+            return infer.predict_video(
+                tmp_path, fold_checkpoint_paths, fold_stats, n_hand_features, device,
+                use_cache=False,
+            )
+        finally:
+            os.remove(tmp_path)
+
+
+tab_video, tab_camera = st.tabs(["📁 Upload video", "🎥 Record video"])
 
 result = None
 
@@ -61,34 +90,24 @@ with tab_video:
     if video_file is not None:
         st.video(video_file)
         if st.button("Analyze video", type="primary", use_container_width=True):
-            with st.spinner("Analyzing tread depth…"):
+            try:
                 suffix = os.path.splitext(video_file.name)[1] or ".mp4"
-                with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
-                    tmp.write(video_file.getvalue())
-                    tmp_path = tmp.name
-                try:
-                    result = infer.predict_video(
-                        tmp_path, fold_checkpoint_paths, fold_stats, n_hand_features, device,
-                        use_cache=False,
-                    )
-                except Exception as e:
-                    st.error(f"Could not analyze this video: {e}")
-                finally:
-                    os.remove(tmp_path)
+                result = run_prediction(video_file.getvalue(), suffix)
+            except Exception as e:
+                st.error(f"Could not analyze this video: {e}")
 
 with tab_camera:
-    st.caption("A single photo gives a quick but less precise reading than a short video scan.")
-    photo = st.camera_input("Take a photo of the tyre tread")
-    if photo is not None:
-        if st.button("Analyze photo", type="primary", use_container_width=True):
-            with st.spinner("Analyzing tread depth…"):
-                image_bgr = cv2.imdecode(np.frombuffer(photo.getvalue(), np.uint8), cv2.IMREAD_COLOR)
-                try:
-                    result = infer.predict_image(
-                        image_bgr, fold_checkpoint_paths, fold_stats, n_hand_features, device,
-                    )
-                except Exception as e:
-                    st.error(f"Could not analyze this photo: {e}")
+    st.caption("Allow camera access, record a few seconds panning across the tread, then send it.")
+    recorder_value = video_recorder(key="cam_recorder")
+    if recorder_value and recorder_value.get("video_b64"):
+        if st.button("Analyze recording", type="primary", use_container_width=True, key="analyze_cam"):
+            try:
+                mime = recorder_value.get("mime_type", "video/webm")
+                suffix = ".mp4" if "mp4" in mime else ".webm"
+                video_bytes = base64.b64decode(recorder_value["video_b64"])
+                result = run_prediction(video_bytes, suffix)
+            except Exception as e:
+                st.error(f"Could not analyze this recording: {e}")
 
 if result is not None:
     st.markdown(

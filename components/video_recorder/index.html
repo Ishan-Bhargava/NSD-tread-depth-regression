@@ -1,0 +1,221 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<style>
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    background: transparent;
+  }
+  #wrap { padding: 4px 2px; }
+  video {
+    width: 100%;
+    max-width: 420px;
+    border-radius: 12px;
+    background: #000;
+    display: block;
+  }
+  .row { display: flex; gap: 8px; margin-top: 10px; max-width: 420px; }
+  button {
+    flex: 1;
+    padding: 10px;
+    border-radius: 10px;
+    border: none;
+    font-size: 0.9rem;
+    font-weight: 600;
+    cursor: pointer;
+  }
+  .primary { background: #1f6feb; color: #fff; }
+  .secondary { background: #eef1f4; color: #1a2027; }
+  .danger { background: #dc2626; color: #fff; }
+  .rec-indicator {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 0.8rem;
+    font-weight: 700;
+    color: #dc2626;
+    margin-top: 8px;
+  }
+  .rec-dot {
+    width: 9px; height: 9px; border-radius: 50%;
+    background: #dc2626;
+    animation: pulse 1s infinite;
+  }
+  @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.3; } }
+  .msg { font-size: 0.85rem; color: #6b7480; margin-top: 8px; max-width: 420px; }
+  .msg.error { color: #dc2626; }
+  .msg.success { color: #16a34a; font-weight: 600; }
+  .hidden { display: none !important; }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <button id="btnStart" class="primary">Start camera</button>
+
+  <video id="live" autoplay muted playsinline class="hidden"></video>
+  <div id="recIndicator" class="rec-indicator hidden"><span class="rec-dot"></span> Recording…</div>
+  <div id="liveControls" class="row hidden">
+    <button id="btnCancel" class="secondary">Cancel</button>
+    <button id="btnToggleRecord" class="primary">Start recording</button>
+  </div>
+
+  <video id="preview" controls playsinline class="hidden"></video>
+  <div id="previewControls" class="row hidden">
+    <button id="btnRetake" class="secondary">Retake</button>
+    <button id="btnUse" class="primary">Use this recording</button>
+  </div>
+
+  <div id="msg" class="msg hidden"></div>
+</div>
+
+<script>
+  function sendMessageToStreamlitClient(type, data) {
+    var outgoingMessage = Object.assign({ isStreamlitMessage: true, type: type }, data);
+    window.parent.postMessage(outgoingMessage, "*");
+  }
+  function initComponent() {
+    sendMessageToStreamlitClient("streamlit:componentReady", { apiVersion: 1 });
+  }
+  function updateHeight() {
+    requestAnimationFrame(() => {
+      var h = document.getElementById("wrap").scrollHeight + 16;
+      sendMessageToStreamlitClient("streamlit:setFrameHeight", { height: h });
+    });
+  }
+  function notifyHost(value) {
+    sendMessageToStreamlitClient("streamlit:setComponentValue", { value: value, dataType: "json" });
+  }
+  window.addEventListener("message", (event) => {
+    if (event.data && event.data.type === "streamlit:render") {
+      updateHeight();
+    }
+  });
+
+  const el = (id) => document.getElementById(id);
+  let mediaStream = null;
+  let mediaRecorder = null;
+  let recordedChunks = [];
+
+  function showMsg(text, kind) {
+    const m = el("msg");
+    m.textContent = text;
+    m.className = "msg" + (kind ? " " + kind : "");
+    m.classList.remove("hidden");
+    updateHeight();
+  }
+  function hideMsg() {
+    el("msg").classList.add("hidden");
+  }
+
+  function stopStream() {
+    if (mediaStream) {
+      mediaStream.getTracks().forEach((t) => t.stop());
+      mediaStream = null;
+    }
+  }
+
+  async function startCamera() {
+    hideMsg();
+    let constraints = { video: { facingMode: "environment" }, audio: false };
+    try {
+      mediaStream = await navigator.mediaDevices.getUserMedia(constraints);
+    } catch (err) {
+      try {
+        mediaStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
+      } catch (err2) {
+        showMsg("Could not access the camera: " + err2.message, "error");
+        return;
+      }
+    }
+    el("live").srcObject = mediaStream;
+    el("btnStart").classList.add("hidden");
+    el("live").classList.remove("hidden");
+    el("liveControls").classList.remove("hidden");
+    el("btnToggleRecord").textContent = "Start recording";
+    el("btnToggleRecord").dataset.recording = "0";
+    updateHeight();
+  }
+
+  el("btnStart").addEventListener("click", startCamera);
+
+  el("btnCancel").addEventListener("click", () => {
+    stopStream();
+    el("live").classList.add("hidden");
+    el("liveControls").classList.add("hidden");
+    el("recIndicator").classList.add("hidden");
+    el("btnStart").classList.remove("hidden");
+    updateHeight();
+  });
+
+  el("btnToggleRecord").addEventListener("click", () => {
+    const recording = el("btnToggleRecord").dataset.recording === "1";
+    if (!recording) {
+      const mimeCandidates = ["video/webm;codecs=vp9", "video/webm", "video/mp4"];
+      const mimeType = mimeCandidates.find((m) => window.MediaRecorder && MediaRecorder.isTypeSupported(m)) || "";
+      recordedChunks = [];
+      try {
+        mediaRecorder = new MediaRecorder(mediaStream, mimeType ? { mimeType } : undefined);
+      } catch (err) {
+        showMsg("Recording isn't supported in this browser: " + err.message, "error");
+        return;
+      }
+      mediaRecorder.ondataavailable = (e) => { if (e.data.size > 0) recordedChunks.push(e.data); };
+      mediaRecorder.onstop = () => {
+        const type = mediaRecorder.mimeType || "video/webm";
+        const blob = new Blob(recordedChunks, { type });
+        const url = URL.createObjectURL(blob);
+        el("preview").src = url;
+        el("preview").dataset.mime = type;
+
+        stopStream();
+        el("live").classList.add("hidden");
+        el("liveControls").classList.add("hidden");
+        el("recIndicator").classList.add("hidden");
+        el("preview").classList.remove("hidden");
+        el("previewControls").classList.remove("hidden");
+        updateHeight();
+
+        const reader = new FileReader();
+        reader.onloadend = () => {
+          const base64 = reader.result.split(",")[1];
+          el("preview").dataset.b64 = base64;
+        };
+        reader.readAsDataURL(blob);
+      };
+      mediaRecorder.start();
+      el("btnToggleRecord").textContent = "Stop recording";
+      el("btnToggleRecord").dataset.recording = "1";
+      el("recIndicator").classList.remove("hidden");
+      updateHeight();
+    } else {
+      mediaRecorder.stop();
+      el("btnToggleRecord").dataset.recording = "0";
+    }
+  });
+
+  el("btnRetake").addEventListener("click", () => {
+    el("preview").classList.add("hidden");
+    el("previewControls").classList.add("hidden");
+    hideMsg();
+    startCamera();
+  });
+
+  el("btnUse").addEventListener("click", () => {
+    const b64 = el("preview").dataset.b64;
+    const mime = el("preview").dataset.mime || "video/webm";
+    if (!b64) {
+      showMsg("Still processing the recording, try again in a second.", "error");
+      return;
+    }
+    notifyHost({ video_b64: b64, mime_type: mime });
+    showMsg("Recording sent ✓", "success");
+  });
+
+  initComponent();
+  updateHeight();
+</script>
+</body>
+</html>
