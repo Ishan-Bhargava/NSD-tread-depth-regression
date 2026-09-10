@@ -98,7 +98,11 @@ with tab_video:
                 st.error(f"Could not analyze this video: {e}")
 
 with tab_camera:
-    st.caption("Allow camera access, record a few seconds panning across the tread, then send it.")
+    st.caption(
+        "Allow camera access, record a few seconds panning across the tread, then send it. "
+        "On mobile: keep the screen on and this tab in the foreground until the Analyze button appears -- "
+        "phones pause background tabs, which can stall the upload."
+    )
     recorder_raw = video_recorder(key="cam_recorder")
     recorder_value = json.loads(recorder_raw) if recorder_raw else None
     if recorder_value and recorder_value.get("video_b64"):
