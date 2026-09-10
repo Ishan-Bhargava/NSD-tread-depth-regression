@@ -58,7 +58,7 @@
   <button id="btnStart" class="primary">Start camera</button>
 
   <video id="live" autoplay muted playsinline class="hidden"></video>
-  <div id="recIndicator" class="rec-indicator hidden"><span class="rec-dot"></span> Recording…</div>
+  <div id="recIndicator" class="rec-indicator hidden"><span class="rec-dot"></span> Recording… (stops automatically after 8s)</div>
   <div id="liveControls" class="row hidden">
     <button id="btnCancel" class="secondary">Cancel</button>
     <button id="btnToggleRecord" class="primary">Start recording</button>
@@ -119,14 +119,22 @@
     }
   }
 
+  // Phone cameras often default to a much higher capture resolution than a
+  // laptop webcam. The hand-crafted feature extraction downstream (Canny /
+  // Gaussian blur / Laplacian / Sobel) runs at the raw frame resolution and
+  // gets noticeably slower the bigger that is, so cap it here -- plenty
+  // sharp for this model, which resizes everything to 224x224 anyway.
+  const VIDEO_CONSTRAINTS = { width: { ideal: 720, max: 960 }, height: { ideal: 1280, max: 1280 } };
+  const MAX_RECORD_MS = 8000;
+
   async function startCamera() {
     hideMsg();
-    let constraints = { video: { facingMode: "environment" }, audio: false };
+    let constraints = { video: { facingMode: "environment", ...VIDEO_CONSTRAINTS }, audio: false };
     try {
       mediaStream = await navigator.mediaDevices.getUserMedia(constraints);
     } catch (err) {
       try {
-        mediaStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
+        mediaStream = await navigator.mediaDevices.getUserMedia({ video: VIDEO_CONSTRAINTS, audio: false });
       } catch (err2) {
         showMsg("Could not access the camera: " + err2.message, "error");
         return;
@@ -154,6 +162,19 @@
     updateHeight();
   });
 
+  let autoStopTimer = null;
+
+  function stopRecording() {
+    if (mediaRecorder && mediaRecorder.state !== "inactive") {
+      mediaRecorder.stop();
+    }
+    el("btnToggleRecord").dataset.recording = "0";
+    if (autoStopTimer) {
+      clearTimeout(autoStopTimer);
+      autoStopTimer = null;
+    }
+  }
+
   el("btnToggleRecord").addEventListener("click", () => {
     const recording = el("btnToggleRecord").dataset.recording === "1";
     if (!recording) {
@@ -161,7 +182,10 @@
       const mimeType = mimeCandidates.find((m) => window.MediaRecorder && MediaRecorder.isTypeSupported(m)) || "";
       recordedChunks = [];
       try {
-        mediaRecorder = new MediaRecorder(mediaStream, mimeType ? { mimeType } : undefined);
+        mediaRecorder = new MediaRecorder(
+          mediaStream,
+          mimeType ? { mimeType, videoBitsPerSecond: 1500000 } : { videoBitsPerSecond: 1500000 },
+        );
       } catch (err) {
         showMsg("Recording isn't supported in this browser: " + err.message, "error");
         return;
@@ -195,9 +219,9 @@
       el("btnToggleRecord").dataset.recording = "1";
       el("recIndicator").classList.remove("hidden");
       updateHeight();
+      autoStopTimer = setTimeout(stopRecording, MAX_RECORD_MS);
     } else {
-      mediaRecorder.stop();
-      el("btnToggleRecord").dataset.recording = "0";
+      stopRecording();
     }
   });
 
