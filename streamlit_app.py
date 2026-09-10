@@ -11,6 +11,7 @@ frame-sampling pipeline.
 """
 
 import base64
+import json
 import os
 import sys
 import tempfile
@@ -98,7 +99,8 @@ with tab_video:
 
 with tab_camera:
     st.caption("Allow camera access, record a few seconds panning across the tread, then send it.")
-    recorder_value = video_recorder(key="cam_recorder")
+    recorder_raw = video_recorder(key="cam_recorder")
+    recorder_value = json.loads(recorder_raw) if recorder_raw else None
     if recorder_value and recorder_value.get("video_b64"):
         if st.button("Analyze recording", type="primary", use_container_width=True, key="analyze_cam"):
             try:
