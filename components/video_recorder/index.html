@@ -13,6 +13,8 @@
   video {
     width: 100%;
     max-width: 420px;
+    aspect-ratio: 3 / 4;
+    object-fit: cover;
     border-radius: 12px;
     background: #000;
     display: block;
@@ -86,7 +88,7 @@
     });
   }
   function notifyHost(value) {
-    sendMessageToStreamlitClient("streamlit:setComponentValue", { value: value, dataType: "json" });
+    sendMessageToStreamlitClient("streamlit:setComponentValue", { value: value });
   }
   window.addEventListener("message", (event) => {
     if (event.data && event.data.type === "streamlit:render") {
@@ -137,6 +139,8 @@
     el("btnToggleRecord").textContent = "Start recording";
     el("btnToggleRecord").dataset.recording = "0";
     updateHeight();
+    setTimeout(updateHeight, 300);
+    setTimeout(updateHeight, 900);
   }
 
   el("btnStart").addEventListener("click", startCamera);
@@ -177,6 +181,7 @@
         el("preview").classList.remove("hidden");
         el("previewControls").classList.remove("hidden");
         updateHeight();
+        setTimeout(updateHeight, 300);
 
         const reader = new FileReader();
         reader.onloadend = () => {
