@@ -3,6 +3,6 @@
 streamlit==1.39.*
 torch==2.13.*
 torchvision==0.28.*
-opencv-python-headless==4.10.*
-numpy>=1.26,<3
+opencv-python-headless==5.0.0.93
+numpy==2.5.0
 pandas>=2.2,<3
