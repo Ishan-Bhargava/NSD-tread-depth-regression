@@ -143,7 +143,7 @@ if len(results) == 1 and results[0].get("ensemble_pred_mm") is not None:
         f"""
         <div class="nsd-result">
           <div class="label">Estimated Tread Depth</div>
-          <div class="value">{results[0]['ensemble_pred_mm']:.2f}<span class="unit"> mm</span></div>
+          <div class="value">{results[0]['ensemble_pred_mm']:.1f}<span class="unit"> mm</span></div>
         </div>
         """,
         unsafe_allow_html=True,
@@ -152,6 +152,6 @@ elif results:
     st.markdown('<div class="nsd-result"><div class="label">Results</div></div>', unsafe_allow_html=True)
     for row in results:
         if row.get("ensemble_pred_mm") is not None:
-            st.write(f"**{row['video']}** — {row['ensemble_pred_mm']:.2f} mm")
+            st.write(f"**{row['video']}** — {row['ensemble_pred_mm']:.1f} mm")
         else:
             st.write(f"**{row['video']}** — failed: {row['error']}")
