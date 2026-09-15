@@ -37,6 +37,28 @@ st.markdown("""
 st.markdown('<div class="nsd-title">🛞 Tyre Tread Depth (NSD)</div>', unsafe_allow_html=True)
 st.markdown('<div class="nsd-sub">Upload one or more scan videos of the tyre tread</div>', unsafe_allow_html=True)
 
+with st.expander("📖 How to record a good video (tap to expand)"):
+    st.markdown(
+        """
+- **Hold the phone sideways (landscape)**, camera grid turned on, ratio set to **Full** — see the settings example below.
+- **Flash/torch ON** for even lighting.
+- Keep the camera about **5-8 cm** from the tread.
+- **Move slowly left to right** around the tyre — not top to bottom.
+- Record for **5-15 seconds**, in HD quality if your phone supports it.
+        """
+    )
+    st.image(
+        os.path.join(PROJECT_ROOT, "camera_grid_full_view.jpg"),
+        caption="Camera settings: grid on, ratio set to Full",
+    )
+    col_howto, col_sample = st.columns(2)
+    with col_howto:
+        st.caption("How to hold and move the phone")
+        st.video(os.path.join(PROJECT_ROOT, "How_To_Capture_Video.mp4"))
+    with col_sample:
+        st.caption("Example of a good recording")
+        st.video(os.path.join(PROJECT_ROOT, "VIDEO4.mp4"))
+
 
 @st.cache_resource(show_spinner="Loading model…")
 def load_models():
