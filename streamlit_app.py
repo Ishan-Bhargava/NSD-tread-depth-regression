@@ -45,7 +45,7 @@ with st.expander("📖 How to record a good video (tap to expand)"):
 - **Flash/torch ON** for even lighting.
 - Keep the camera about **5-8 cm** from the tread.
 - **Move slowly left to right** around the tyre — not top to bottom.
-- Record for **5-15 seconds**, in HD quality if your phone supports it.
+- Record for **4-8 seconds**, in HD quality if your phone supports it.
         """
     )
     st.image(
