@@ -1,7 +1,7 @@
 """
 Streamlit deployment of the NSD tread-depth ensemble. Simple, one-screen
-UI for a non-technical user: upload a video, get back one number -- the
-ensemble tread depth in mm.
+UI for a non-technical user: upload one or more videos, get back the
+ensemble tread depth in mm for each.
 """
 
 import os
@@ -35,7 +35,7 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 st.markdown('<div class="nsd-title">🛞 Tyre Tread Depth (NSD)</div>', unsafe_allow_html=True)
-st.markdown('<div class="nsd-sub">Upload a scan video of the tyre tread</div>', unsafe_allow_html=True)
+st.markdown('<div class="nsd-sub">Upload one or more scan videos of the tyre tread</div>', unsafe_allow_html=True)
 
 
 @st.cache_resource(show_spinner="Loading model…")
@@ -50,40 +50,62 @@ fold_checkpoint_paths, fold_stats, n_hand_features, device = load_models()
 
 
 def run_prediction(video_bytes, suffix):
-    with st.spinner("Analyzing tread depth…"):
-        with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
-            tmp.write(video_bytes)
-            tmp_path = tmp.name
-        try:
-            return infer.predict_video(
-                tmp_path, fold_checkpoint_paths, fold_stats, n_hand_features, device,
-                use_cache=False,
-            )
-        finally:
-            os.remove(tmp_path)
+    with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
+        tmp.write(video_bytes)
+        tmp_path = tmp.name
+    try:
+        return infer.predict_video(
+            tmp_path, fold_checkpoint_paths, fold_stats, n_hand_features, device,
+            use_cache=False,
+        )
+    finally:
+        os.remove(tmp_path)
 
 
-result = None
+results = []
 
-video_file = st.file_uploader(
-    "Choose a short video of the tyre tread", type=["mp4", "mov", "avi", "mkv", "m4v"],
+video_files = st.file_uploader(
+    "Choose one or more short videos of the tyre tread",
+    type=["mp4", "mov", "avi", "mkv", "m4v"],
+    accept_multiple_files=True,
 )
-if video_file is not None:
-    st.video(video_file)
-    if st.button("Analyze video", type="primary", use_container_width=True):
-        try:
-            suffix = os.path.splitext(video_file.name)[1] or ".mp4"
-            result = run_prediction(video_file.getvalue(), suffix)
-        except Exception as e:
-            st.error(f"Could not analyze this video: {e}")
 
-if result is not None:
+if video_files:
+    if len(video_files) == 1:
+        st.video(video_files[0])
+    else:
+        st.caption(f"{len(video_files)} videos selected: " + ", ".join(f.name for f in video_files))
+
+    label = "Analyze video" if len(video_files) == 1 else f"Analyze {len(video_files)} videos"
+    if st.button(label, type="primary", use_container_width=True):
+        progress = st.progress(0.0)
+        status = st.empty()
+        for i, video_file in enumerate(video_files, start=1):
+            status.write(f"Analyzing {video_file.name} ({i}/{len(video_files)})…")
+            try:
+                suffix = os.path.splitext(video_file.name)[1] or ".mp4"
+                result = run_prediction(video_file.getvalue(), suffix)
+                results.append({"video": video_file.name, "ensemble_pred_mm": result["ensemble_pred_mm"]})
+            except Exception as e:
+                results.append({"video": video_file.name, "ensemble_pred_mm": None, "error": str(e)})
+            progress.progress(i / len(video_files))
+        status.empty()
+        progress.empty()
+
+if len(results) == 1 and results[0].get("ensemble_pred_mm") is not None:
     st.markdown(
         f"""
         <div class="nsd-result">
           <div class="label">Estimated Tread Depth</div>
-          <div class="value">{result['ensemble_pred_mm']:.2f}<span class="unit"> mm</span></div>
+          <div class="value">{results[0]['ensemble_pred_mm']:.2f}<span class="unit"> mm</span></div>
         </div>
         """,
         unsafe_allow_html=True,
     )
+elif results:
+    st.markdown('<div class="nsd-result"><div class="label">Results</div></div>', unsafe_allow_html=True)
+    for row in results:
+        if row.get("ensemble_pred_mm") is not None:
+            st.write(f"**{row['video']}** — {row['ensemble_pred_mm']:.2f} mm")
+        else:
+            st.write(f"**{row['video']}** — failed: {row['error']}")
