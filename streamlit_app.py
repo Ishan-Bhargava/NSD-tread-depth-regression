@@ -62,12 +62,16 @@ def run_prediction(video_bytes, suffix):
         os.remove(tmp_path)
 
 
-results = []
+if "uploader_key" not in st.session_state:
+    st.session_state.uploader_key = 0
+if "results" not in st.session_state:
+    st.session_state.results = []
 
 video_files = st.file_uploader(
     "Choose one or more short videos of the tyre tread",
     type=["mp4", "mov", "avi", "mkv", "m4v"],
     accept_multiple_files=True,
+    key=f"video_uploader_{st.session_state.uploader_key}",
 )
 
 if video_files:
@@ -76,8 +80,20 @@ if video_files:
     else:
         st.caption(f"{len(video_files)} videos selected: " + ", ".join(f.name for f in video_files))
 
-    label = "Analyze video" if len(video_files) == 1 else f"Analyze {len(video_files)} videos"
-    if st.button(label, type="primary", use_container_width=True):
+    col_analyze, col_clear = st.columns([3, 1])
+    with col_analyze:
+        label = "Analyze video" if len(video_files) == 1 else f"Analyze {len(video_files)} videos"
+        analyze_clicked = st.button(label, type="primary", use_container_width=True)
+    with col_clear:
+        clear_clicked = st.button("Clear", use_container_width=True)
+
+    if clear_clicked:
+        st.session_state.uploader_key += 1
+        st.session_state.results = []
+        st.rerun()
+
+    if analyze_clicked:
+        st.session_state.results = []
         progress = st.progress(0.0)
         status = st.empty()
         for i, video_file in enumerate(video_files, start=1):
@@ -85,12 +101,16 @@ if video_files:
             try:
                 suffix = os.path.splitext(video_file.name)[1] or ".mp4"
                 result = run_prediction(video_file.getvalue(), suffix)
-                results.append({"video": video_file.name, "ensemble_pred_mm": result["ensemble_pred_mm"]})
+                st.session_state.results.append({"video": video_file.name, "ensemble_pred_mm": result["ensemble_pred_mm"]})
             except Exception as e:
-                results.append({"video": video_file.name, "ensemble_pred_mm": None, "error": str(e)})
+                st.session_state.results.append({"video": video_file.name, "ensemble_pred_mm": None, "error": str(e)})
             progress.progress(i / len(video_files))
         status.empty()
         progress.empty()
+else:
+    st.session_state.results = []
+
+results = st.session_state.results
 
 if len(results) == 1 and results[0].get("ensemble_pred_mm") is not None:
     st.markdown(
